@@ -11,7 +11,7 @@ import '../data/store.dart';
 import '../services/billing.dart';
 
 /// Nơi công bố mã nguồn app (bắt buộc theo GPL vì app đóng gói Stockfish). Điền địa chỉ kho mã trước khi phát hành.
-const sourceUrl = '';
+const sourceUrl = 'https://github.com/yeeplugin/kibitz';
 
 class ProPage extends StatefulWidget {
   const ProPage({super.key, required this.store, required this.billing});
