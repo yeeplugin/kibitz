@@ -30,7 +30,7 @@ Future<(Analysis, bool)> analyzePosition(Store store, String fen, List<String> m
 Future<String> stageMove(Store store, String fen, List<String> moves, Stage stage) async {
   if (stage.full) {
     // Màn Stockfish luôn dùng Stockfish, kể cả khi Cài đặt đang chọn engine có sẵn cho phần gợi ý.
-    if (stage.stockfish ? store.pro : store.useStockfish) {
+    if (stage.stockfish ? store.pro && Store.stockfishSupported : store.useStockfish) {
       try {
         return (await StockfishService.instance.analyze(fen, moves, ms: stage.ms, maxDepth: 64)).best;
       } catch (_) {}

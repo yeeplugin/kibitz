@@ -8,6 +8,7 @@ import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:material_ui/material_ui.dart';
 
 import '../../core/chess/position.dart';
@@ -62,6 +63,9 @@ class CameraSource extends FrameSource {
       _turns = back.sensorOrientation ~/ 90;
       _ctl = ctl;
       await ctl.startImageStream(_onImage);
+    } on MissingPluginException {
+      // Nền tảng chưa có plugin camera (bản Mac).
+      throw CameraUnavailable(false);
     } on CameraException catch (e) {
       final code = e.code.toLowerCase();
       throw CameraUnavailable(code.contains('denied') || code.contains('restricted') || code.contains('permission'));

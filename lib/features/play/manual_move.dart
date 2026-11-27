@@ -1,19 +1,15 @@
 /// Nhập một nước đi bằng tay (khi camera không nhận ra, hoặc muốn phong cấp quân khác hậu).
 library;
 
-import 'package:material_ui/material_ui.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 
 import '../../core/chess/position.dart';
 import '../../core/coach.dart';
 import '../../core/i18n.dart';
 import '../../shared/board_view.dart';
+import '../../shared/ios.dart';
 
-Future<int?> showManualMove(BuildContext context, Position pos) => showModalBottomSheet<int>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (c) => _ManualMove(pos: pos),
-    );
+Future<int?> showManualMove(BuildContext context, Position pos) => iosSheet<int>(context, (c) => _ManualMove(pos: pos));
 
 class _ManualMove extends StatefulWidget {
   const _ManualMove({required this.pos});
@@ -34,16 +30,7 @@ class _ManualMoveState extends State<_ManualMove> {
       if (cands.isNotEmpty) {
         var m = cands.first;
         if (cands.length > 1) {
-          final pr = await showDialog<int>(
-            context: context,
-            builder: (c) => SimpleDialog(
-              title: Text('Phong cấp thành'.tr),
-              children: [
-                for (final t in const [queen, rook, bishop, knight])
-                  SimpleDialogOption(onPressed: () => Navigator.pop(c, t), child: Text(pieceNames[t].tr)),
-              ],
-            ),
-          );
+          final pr = await iosActionSheet<int>(context, title: 'Phong cấp thành'.tr, cancel: 'Huỷ'.tr, actions: {for (final t in const [queen, rook, bishop, knight]) t: pieceNames[t].tr});
           if (pr == null) return;
           m = cands.firstWhere((x) => mPromo(x) == pr);
         }
@@ -61,7 +48,7 @@ class _ManualMoveState extends State<_ManualMove> {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('Chạm quân rồi chạm ô đến'.tr, style: Theme.of(context).textTheme.titleMedium),
+          Text('Chạm quân rồi chạm ô đến'.tr, style: tHeadline),
           const SizedBox(height: 12),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),

@@ -9,7 +9,9 @@ import 'dart:ui' as ui;
 import 'package:app_settings/app_settings.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:material_ui/material_ui.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:material_ui/material_ui.dart' show Colors, Material, Scaffold;
 
 import '../../core/chess/engine.dart';
 import '../../core/chess/position.dart';
@@ -21,6 +23,7 @@ import '../../core/vision/image.dart';
 import '../../core/vision/tracker.dart';
 import '../../data/store.dart';
 import '../../services/analyzer.dart';
+import '../../shared/ios.dart';
 import '../../shared/board_view.dart';
 import 'frame_source.dart';
 import 'manual_move.dart';
@@ -296,19 +299,16 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
     }
     final odd = (cl.observe(img)..setBase(_pos.board)).odd();
     if (odd.length > 3) {
-      final go = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: Text('Bàn thật chưa khớp'.tr),
-          content: Text('Có {0} ô trên bàn thật trông khác thế cờ trong app ({1}). Kiểm tra lưới, hướng bàn và cách xếp quân.'
-              .trArgs([odd.length, odd.take(6).map(sqName).join(', ')])),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: Text('Chỉnh lại'.tr)),
-            TextButton(onPressed: () => Navigator.pop(c, true), child: Text('Vẫn bắt đầu'.tr)),
-          ],
-        ),
+      final go = await iosConfirm(
+        context,
+        title: 'Bàn thật chưa khớp'.tr,
+        message: 'Có {0} ô trên bàn thật trông khác thế cờ trong app ({1}). Kiểm tra lưới, hướng bàn và cách xếp quân.'
+            .trArgs([odd.length, odd.take(6).map(sqName).join(', ')]),
+        ok: 'Vẫn bắt đầu'.tr,
+        cancel: 'Chỉnh lại'.tr,
       );
-      if (go != true) return;
+      if (!mounted) return;
+      if (!go) return;
     }
     await store.saveCalibration(_src!.id, g, _rot);
     if (cl.elevation < 30) _snack('Camera đang nhìn quá ngang (khoảng {0}°). Nâng máy cao hơn để quân không che nhau.'.trArgs([cl.elevation.round()]));
@@ -499,7 +499,24 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
     }
   }
 
-  void _snack(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  void _snack(String s) => iosToast(context, s);
+
+  Future<void> _photoMenu() async {
+    final v = await iosActionSheet<int>(context, title: 'Ảnh bàn cờ'.tr, cancel: 'Huỷ'.tr, actions: {
+      0: 'Chọn ảnh bàn cờ'.tr,
+      // Mac không chụp được qua trình chọn ảnh, chỉ chọn tệp.
+      if (defaultTargetPlatform != TargetPlatform.macOS) 1: 'Chụp ảnh bàn cờ'.tr,
+      if (_src is PhotoSource) 2: store.simulate ? 'Về bàn cờ mô phỏng'.tr : 'Về camera trực tiếp'.tr,
+    });
+    switch (v) {
+      case 0:
+        _pickPhoto(ImageSource.gallery);
+      case 1:
+        _pickPhoto(ImageSource.camera);
+      case 2:
+        _backToLive();
+    }
+  }
 
   // ---------------------------------------------------------------- giao diện
 
@@ -507,54 +524,63 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(_tracking ? 'Theo dõi'.tr : 'Căn bàn cờ'.tr),
-        actions: [
-          if (_tracking)
-            IconButton(
-              tooltip: store.drawnBoard ? 'Xem hình camera'.tr : 'Xem bàn cờ vẽ'.tr,
-              icon: Icon(store.drawnBoard ? Icons.videocam_outlined : Icons.grid_on),
-              onPressed: () async {
-                await store.setDrawnBoard(!store.drawnBoard);
-                if (mounted) setState(() {});
-              },
-            ),
-          IconButton(
-            tooltip: 'Biên bản ván cờ'.tr,
-            icon: const Icon(Icons.list_alt),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(builder: (_) => RecordPage(game: game, save: () => store.saveGame(game), flipped: store.side == Side.black)),
-            ),
-          ),
-          if (_tracking) IconButton(tooltip: 'Căn lại'.tr, icon: const Icon(Icons.crop_free), onPressed: _recalibrate),
-          PopupMenuButton<int>(
-            tooltip: 'Ảnh bàn cờ'.tr,
-            icon: const Icon(Icons.add_photo_alternate_outlined),
-            onSelected: (v) => switch (v) { 0 => _pickPhoto(ImageSource.gallery), 1 => _pickPhoto(ImageSource.camera), _ => _backToLive() },
-            itemBuilder: (_) => [
-              PopupMenuItem(value: 0, child: ListTile(leading: const Icon(Icons.photo_library_outlined), title: Text('Chọn ảnh bàn cờ'.tr))),
-              PopupMenuItem(value: 1, child: ListTile(leading: const Icon(Icons.photo_camera_outlined), title: Text('Chụp ảnh bàn cờ'.tr))),
-              if (_src is PhotoSource)
-                PopupMenuItem(
-                  value: 2,
-                  child: ListTile(leading: const Icon(Icons.videocam_outlined), title: Text(store.simulate ? 'Về bàn cờ mô phỏng'.tr : 'Về camera trực tiếp'.tr)),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(44),
+        child: CupertinoTheme(
+          data: const CupertinoThemeData(brightness: Brightness.dark, primaryColor: Color(0xFF0A84FF)),
+          child: CupertinoNavigationBar(
+            backgroundColor: Colors.black,
+            automaticBackgroundVisibility: false,
+            transitionBetweenRoutes: false,
+            border: null,
+            middle: Text(_tracking ? 'Theo dõi'.tr : 'Căn bàn cờ'.tr),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (_tracking)
+                IosNavButton(
+                  icon: store.drawnBoard ? CupertinoIcons.videocam : CupertinoIcons.square_grid_2x2,
+                  onPressed: () async {
+                    await store.setDrawnBoard(!store.drawnBoard);
+                    if (mounted) setState(() {});
+                  },
                 ),
-            ],
+              IosNavButton(
+                icon: CupertinoIcons.list_bullet,
+                onPressed: () => iosPush<void>(context, RecordPage(game: game, save: () => store.saveGame(game), flipped: store.side == Side.black)),
+              ),
+              if (_tracking) IosNavButton(icon: CupertinoIcons.viewfinder, onPressed: _recalibrate),
+              IosNavButton(icon: CupertinoIcons.photo_on_rectangle, onPressed: _photoMenu),
+            ]),
           ),
-        ],
+        ),
       ),
       body: SafeArea(
         top: false,
+        bottom: false,
         child: LayoutBuilder(builder: (context, c) {
           final wide = c.maxWidth > c.maxHeight * 1.1;
           // Đang theo dõi: màn hình chính là bàn cờ app tự vẽ lại từ thế cờ đã nhận diện, hoặc hình camera.
           final view = _tracking && store.drawnBoard ? _bigBoard() : _view();
-          final panel = Material(color: Theme.of(context).colorScheme.surface, child: _tracking ? _trackPanel() : _calibratePanel());
+          final panel = Material(
+            color: iosCellBg(context),
+            child: SafeArea(
+              top: false,
+              // iPad dọc: nội dung bảng điều khiển không trải hết bề ngang.
+              // Màn ngang: bảng cao hết màn hình, nội dung bám phía trên và cuộn được nếu thiếu chỗ.
+              child: Align(
+                alignment: Alignment.topCenter,
+                heightFactor: wide ? null : 1,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: DefaultTextStyle(
+                    style: tSubhead.copyWith(color: iosLabel(context)),
+                    child: wide ? SingleChildScrollView(child: _tracking ? _trackPanel() : _calibratePanel()) : (_tracking ? _trackPanel() : _calibratePanel()),
+                  ),
+                ),
+              ),
+            ),
+          );
           if (wide) {
-            return Row(children: [Expanded(child: view), SizedBox(width: 380, child: panel)]);
+            return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(child: view), SizedBox(width: 380, child: panel)]);
           }
           return Column(children: [Expanded(child: view), panel]);
         }),
@@ -588,26 +614,28 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.no_photography, color: Colors.white54, size: 56),
+            const Icon(CupertinoIcons.video_camera, color: Colors.white54, size: 56),
             const SizedBox(height: 12),
             Text(_camError!, style: const TextStyle(color: Colors.white), textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            if (_camDenied) FilledButton(onPressed: () => AppSettings.openAppSettings(), child: Text('Mở Cài đặt'.tr)),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+            if (_camDenied) IosButton(label: 'Mở Cài đặt'.tr, onPressed: () => AppSettings.openAppSettings()),
+            const SizedBox(height: 10),
+            IosButton(
+              kind: IosButtonKind.tinted,
+              color: const Color(0xFF0A84FF),
+              label: 'Dùng bàn cờ mô phỏng'.tr,
               onPressed: () async {
                 await store.setSimulate(true);
                 _openSource();
               },
-              child: Text('Dùng bàn cờ mô phỏng'.tr),
             ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+            const SizedBox(height: 10),
+            IosButton(
+              kind: IosButtonKind.tinted,
+              color: const Color(0xFF0A84FF),
+              icon: CupertinoIcons.photo_on_rectangle,
+              label: 'Chọn ảnh bàn cờ'.tr,
               onPressed: () => _pickPhoto(ImageSource.gallery),
-              icon: const Icon(Icons.photo_library_outlined),
-              label: Text('Chọn ảnh bàn cờ'.tr),
             ),
           ]),
         ),
@@ -618,7 +646,7 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
       builder: (context, img, _) {
         if (img == null || _src == null) {
           return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const CircularProgressIndicator(color: Colors.white),
+            const CupertinoActivityIndicator(radius: 14, color: Colors.white),
             const SizedBox(height: 12),
             Text('Đang mở camera…'.tr, style: const TextStyle(color: Colors.white70)),
           ]));
@@ -647,7 +675,7 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
                         marked: _tracking && (_upd?.state == TrackState.mismatch) ? _upd!.mismatch : const {},
                       ),
                     ),
-                  if (_finding) const Center(child: CircularProgressIndicator(color: Colors.white)),
+                  if (_finding) const Center(child: CupertinoActivityIndicator(radius: 16, color: Colors.white)),
                 ]),
               );
             }),
@@ -674,37 +702,43 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
               : sim
                   ? 'Bàn cờ mô phỏng (máy không có camera). Bấm "Tự tìm bàn" hoặc kéo 4 góc khớp 4 góc ô cờ.'.tr
                   : 'Đặt điện thoại cố định phía trên bàn cờ, thấy trọn 64 ô. Bấm "Tự tìm bàn" hoặc kéo 4 góc khớp 4 góc ô cờ (không tính viền).'.tr,
-          style: Theme.of(context).textTheme.bodyMedium,
+          style: tSubhead,
         ),
         const SizedBox(height: 6),
-        Text('Ô a1 (góc xanh) phải là góc trái gần bên Trắng. Sai thì bấm "Xoay hướng".'.tr, style: Theme.of(context).textTheme.bodySmall),
+        Text('Ô a1 (góc xanh) phải là góc trái gần bên Trắng. Sai thì bấm "Xoay hướng".'.tr, style: tFootnote.copyWith(color: iosLabel2(context))),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(
-            child: OutlinedButton.icon(
+            child: IosButton(
+              kind: IosButtonKind.gray,
+              compact: true,
               onPressed: _frame.value == null || _finding ? null : _autoFind,
-              icon: const Icon(Icons.auto_fix_high),
-              label: Text('Tự tìm bàn'.tr),
+              icon: CupertinoIcons.wand_stars,
+              label: 'Tự tìm bàn'.tr,
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: OutlinedButton.icon(
+            child: IosButton(
+              kind: IosButtonKind.gray,
+              compact: true,
               onPressed: () => setState(() => _rot = (_rot + 1) % 4),
-              icon: const Icon(Icons.rotate_90_degrees_cw),
-              label: Text('Xoay hướng'.tr),
+              icon: CupertinoIcons.rotate_right,
+              label: 'Xoay hướng'.tr,
             ),
           ),
         ]),
+        const SizedBox(height: 4),
         Row(children: [
-          Expanded(child: Text('Lưới lệch một hàng? Dời cả lưới:'.tr, style: Theme.of(context).textTheme.bodySmall)),
-          for (final (icon, du, dv) in const [(Icons.arrow_back, -1, 0), (Icons.arrow_upward, 0, -1), (Icons.arrow_downward, 0, 1), (Icons.arrow_forward, 1, 0)])
-            IconButton(visualDensity: VisualDensity.compact, onPressed: () => _nudge(du, dv), icon: Icon(icon, size: 20)),
+          Expanded(child: Text('Lưới lệch một hàng? Dời cả lưới:'.tr, style: tFootnote.copyWith(color: iosLabel2(context)))),
+          for (final (icon, du, dv) in const [(CupertinoIcons.arrow_left, -1, 0), (CupertinoIcons.arrow_up, 0, -1), (CupertinoIcons.arrow_down, 0, 1), (CupertinoIcons.arrow_right, 1, 0)])
+            CupertinoButton(padding: EdgeInsets.zero, minimumSize: const Size(38, 38), onPressed: () => _nudge(du, dv), child: Icon(icon, size: 20)),
         ]),
-        FilledButton.icon(
+        const SizedBox(height: 4),
+        IosButton(
           onPressed: _frame.value == null || _finding ? null : _startTracking,
-          icon: const Icon(Icons.play_arrow),
-          label: Text('Bắt đầu theo dõi'.tr),
+          icon: CupertinoIcons.play_fill,
+          label: 'Bắt đầu theo dõi'.tr,
         ),
       ]),
     );
@@ -734,18 +768,18 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
         MoveQuality.inaccuracy => const Color(0xFFB7791F),
         MoveQuality.mistake => const Color(0xFFDD6B20),
         MoveQuality.blunder => const Color(0xFFC53030),
-        null => Theme.of(context).colorScheme.onSurfaceVariant,
+        null => iosLabel2(context),
       };
 
   Widget _trackPanel() {
     final sim = _src is SimSource;
     final a = _analysis != null && _analysisPly == game.moves.length ? _analysis : null;
     final sans = game.sans();
-    final cs = Theme.of(context).colorScheme;
+    final grey = iosLabel2(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(_statusLine(), style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+        Text(_statusLine(), style: tHeadline),
         if (_feedback != null) ...[
           const SizedBox(height: 4),
           Text(_feedback!, style: TextStyle(color: _qColor(_feedbackQ), fontWeight: FontWeight.w600)),
@@ -756,30 +790,20 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
           SizedBox(
             width: 150,
             height: 150,
-            child: store.drawnBoard ? ClipRRect(borderRadius: BorderRadius.circular(6), child: ColoredBox(color: Colors.black, child: _view())) : _board(),
+            child: ClipRRect(borderRadius: BorderRadius.circular(8), child: store.drawnBoard ? ColoredBox(color: Colors.black, child: _view()) : _board()),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if (!_recordOnly) Row(children: [
-                Text(a == null ? '…' : scoreText(a), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                Text(a == null ? '…' : scoreText(a), style: tHeadline),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: a == null ? 0.5 : (scoreBar(a) + 1) / 2,
-                      minHeight: 10,
-                      backgroundColor: const Color(0xFF2D2D2D),
-                      color: const Color(0xFFF2F2F2),
-                    ),
-                  ),
-                ),
+                Expanded(child: EvalBar(value: a == null ? 0.5 : (scoreBar(a) + 1) / 2)),
               ]),
               if (!_recordOnly && a != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 3),
-                  child: Text('{0} · sâu {1}'.trArgs([_byStockfish ? 'Stockfish' : 'Engine có sẵn'.tr, a.depth]), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                  child: Text('{0} · sâu {1}'.trArgs([_byStockfish ? 'Stockfish' : 'Engine có sẵn'.tr, a.depth]), style: tFootnote.copyWith(color: grey)),
                 ),
               if (!_recordOnly) const SizedBox(height: 6),
               SizedBox(
@@ -790,7 +814,7 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
                     sans.isEmpty
                         ? 'Chưa có nước nào.'.tr
                         : [for (var i = 0; i < sans.length; i += 2) '${i ~/ 2 + 1}. ${sans[i]}${i + 1 < sans.length ? ' ${sans[i + 1]}' : ''}'].join('   '),
-                    style: TextStyle(color: cs.onSurfaceVariant, height: 1.5),
+                    style: tSubhead.copyWith(color: grey, height: 1.5),
                   ),
                 ),
               ),
@@ -801,23 +825,26 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
           const SizedBox(height: 8),
           Row(children: [
             Expanded(
-              child: FilledButton.tonalIcon(
+              child: IosButton(
+                kind: IosButtonKind.tinted,
+                compact: true,
                 onPressed: _finding ? null : () => _pickPhoto(_lastPick),
-                icon: Icon(_lastPick == ImageSource.camera ? Icons.photo_camera_outlined : Icons.photo_library_outlined),
-                label: Text('Ảnh sau nước đi'.tr),
+                icon: _lastPick == ImageSource.camera ? CupertinoIcons.camera : CupertinoIcons.photo_on_rectangle,
+                label: 'Ảnh sau nước đi'.tr,
               ),
             ),
           ]),
           const SizedBox(height: 2),
-          Text('Đi một nước trên bàn thật, chụp lại từ gần chỗ cũ rồi đưa ảnh mới vào.'.tr, style: Theme.of(context).textTheme.bodySmall),
+          Text('Đi một nước trên bàn thật, chụp lại từ gần chỗ cũ rồi đưa ảnh mới vào.'.tr, style: tFootnote.copyWith(color: grey)),
         ],
         if (sim) ...[
           const SizedBox(height: 6),
           Row(children: [
-            Expanded(child: Text('Mô phỏng: chạm bàn cờ vẽ để đi quân trên bàn "thật".'.tr, style: Theme.of(context).textTheme.bodySmall)),
+            Expanded(child: Text('Mô phỏng: chạm bàn cờ vẽ để đi quân trên bàn "thật".'.tr, style: tFootnote.copyWith(color: grey))),
             if (store.side != Side.both && !_recordOnly) ...[
-              Text('Máy đi thay đối thủ'.tr, style: Theme.of(context).textTheme.bodySmall),
-              Switch(
+              Text('Máy đi thay đối thủ'.tr, style: tFootnote.copyWith(color: grey)),
+              const SizedBox(width: 6),
+              CupertinoSwitch(
                   value: _simAuto,
                   onChanged: (v) {
                     setState(() => _simAuto = v);
@@ -828,16 +855,21 @@ class _PlayPageState extends State<PlayPage> with WidgetsBindingObserver {
         ],
         const SizedBox(height: 6),
         Row(children: [
-          Expanded(child: TextButton.icon(onPressed: game.moves.isEmpty ? null : _undo, icon: const Icon(Icons.undo), label: Text('Lùi'.tr))),
-          Expanded(child: TextButton.icon(onPressed: _pos.status() == GameStatus.ongoing ? _manual : null, icon: const Icon(Icons.touch_app), label: Text('Nhập tay'.tr))),
-          if (!store.autoHint && !_recordOnly)
+          Expanded(child: IosButton(kind: IosButtonKind.gray, compact: true, onPressed: game.moves.isEmpty ? null : _undo, icon: CupertinoIcons.arrow_uturn_left, label: 'Lùi'.tr)),
+          const SizedBox(width: 8),
+          Expanded(child: IosButton(kind: IosButtonKind.gray, compact: true, onPressed: _pos.status() == GameStatus.ongoing ? _manual : null, icon: CupertinoIcons.hand_draw, label: 'Nhập tay'.tr)),
+          if (!store.autoHint && !_recordOnly) ...[
+            const SizedBox(width: 8),
             Expanded(
-              child: TextButton.icon(
+              child: IosButton(
+                kind: IosButtonKind.tinted,
+                compact: true,
                 onPressed: _myTurn && !_hintShown ? () => setState(() => _hintShown = true) : null,
-                icon: const Icon(Icons.lightbulb_outline),
-                label: Text('Gợi ý'.tr),
+                icon: CupertinoIcons.lightbulb,
+                label: 'Gợi ý'.tr,
               ),
             ),
+          ],
         ]),
       ]),
     );

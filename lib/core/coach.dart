@@ -220,8 +220,10 @@ String describeMove(Position p, int m) {
 String scoreText(Analysis a) {
   final m = a.mateIn;
   if (m != null) return m > 0 ? '#$m' : '#-${-m}';
-  final v = a.whiteScore / 100;
-  return '${v >= 0 ? '+' : ''}${v.toStringAsFixed(1)}';
+  // Làm tròn trước khi xét dấu, để điểm rất nhỏ không hiện thành "-0.0".
+  final t = (a.whiteScore / 100).toStringAsFixed(1);
+  if (t == '-0.0' || t == '0.0') return '0.0';
+  return t.startsWith('-') ? t : '+$t';
 }
 
 /// Điểm bên trắng quy về thang -1…1 để vẽ thanh đánh giá.

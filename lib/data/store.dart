@@ -64,7 +64,10 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool get useStockfish => pro && wantStockfish;
+  /// Gói Stockfish chỉ có cho iOS và Android: bản Mac luôn dùng engine có sẵn.
+  static bool get stockfishSupported => !kIsWeb && (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.android);
+
+  bool get useStockfish => stockfishSupported && pro && wantStockfish;
 
   /// Hiện gợi ý ngay khi tới lượt (tắt thì phải bấm nút mới hiện).
   bool get autoHint => _box.get('autoHint') as bool? ?? true;

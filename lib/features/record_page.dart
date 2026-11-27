@@ -5,7 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
-import 'package:material_ui/material_ui.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../core/chess/position.dart';
@@ -13,6 +13,7 @@ import '../core/coach.dart';
 import '../core/i18n.dart';
 import '../data/store.dart';
 import '../shared/board_view.dart';
+import '../shared/ios.dart';
 
 String _two(int v) => v.toString().padLeft(2, '0');
 
@@ -135,11 +136,52 @@ class _RecordPageState extends State<RecordPage> {
     if (mounted) _snack(done);
   }
 
-  void _snack(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  void _snack(String s) => iosToast(context, s);
+
+  Future<void> _export() async {
+    final v = await iosActionSheet<int>(context, title: 'Xuất biên bản'.tr, cancel: 'Huỷ'.tr, actions: {
+      0: 'Chia sẻ tệp PGN'.tr,
+      1: 'Sao chép PGN'.tr,
+      2: 'Sao chép các nước đi'.tr,
+    });
+    switch (v) {
+      case 0:
+        await _share();
+      case 1:
+        await _copy(game.pgn(), 'Đã sao chép PGN.'.tr);
+      case 2:
+        await _copy(game.moveTokens().join(' '), 'Đã sao chép các nước đi.'.tr);
+    }
+  }
+
+  Widget _nameField(TextEditingController c, String label) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(children: [
+          SizedBox(width: 64, child: Text(label, style: tBody)),
+          Expanded(
+            child: CupertinoTextField(
+              controller: c,
+              onChanged: (_) => _names(),
+              placeholder: 'Tên người chơi'.tr,
+              decoration: null,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              style: tBody.copyWith(color: iosLabel(context)),
+              clearButtonMode: OverlayVisibilityMode.editing,
+              textInputAction: TextInputAction.done,
+            ),
+          ),
+        ]),
+      );
+
+  Widget _step(IconData icon, String tip, VoidCallback? onPressed, {double size = 24}) => Semantics(
+        label: tip,
+        button: true,
+        child: CupertinoButton(padding: const EdgeInsets.symmetric(horizontal: 10), minimumSize: const Size(44, 44), onPressed: onPressed, child: Icon(icon, size: size)),
+      );
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final grey = iosLabel2(context);
     final pos = game.position(_ply);
     (int, int)? last;
     if (_ply > 0) {
@@ -148,96 +190,54 @@ class _RecordPageState extends State<RecordPage> {
     }
     final empty = _sans.isEmpty;
     final date = gameDate(game);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Biên bản ván cờ'.tr),
-        actions: [
-          PopupMenuButton<int>(
-            key: _shareKey,
-            tooltip: 'Xuất biên bản'.tr,
-            icon: const Icon(Icons.ios_share),
-            enabled: !empty,
-            onSelected: (v) => switch (v) {
-              0 => _share(),
-              1 => _copy(game.pgn(), 'Đã sao chép PGN.'.tr),
-              _ => _copy(game.moveTokens().join(' '), 'Đã sao chép các nước đi.'.tr),
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(value: 0, child: ListTile(leading: const Icon(Icons.insert_drive_file_outlined), title: Text('Chia sẻ tệp PGN'.tr))),
-              PopupMenuItem(value: 1, child: ListTile(leading: const Icon(Icons.copy), title: Text('Sao chép PGN'.tr))),
-              PopupMenuItem(value: 2, child: ListTile(leading: const Icon(Icons.short_text), title: Text('Sao chép các nước đi'.tr))),
-            ],
-          ),
-        ],
+    return IosPage(
+      title: 'Biên bản ván cờ'.tr,
+      board: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: IgnorePointer(child: BoardView(board: List<int>.of(pos.board), flipped: widget.flipped, lastMove: last)),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-        children: [
-          Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Row(children: [
-                  Expanded(child: TextField(controller: _white, onChanged: (_) => _names(), decoration: InputDecoration(labelText: 'Trắng'.tr, hintText: 'Tên người chơi'.tr, isDense: true, border: const OutlineInputBorder()))),
-                  const SizedBox(width: 10),
-                  Expanded(child: TextField(controller: _black, onChanged: (_) => _names(), decoration: InputDecoration(labelText: 'Đen'.tr, hintText: 'Tên người chơi'.tr, isDense: true, border: const OutlineInputBorder()))),
-                ]),
-                const SizedBox(height: 8),
-                Text(
-                  [if (date.isNotEmpty) date, '{0} nước'.trArgs([_sans.length]), resultText(game)].join(' · '),
-                  key: const ValueKey('info'),
-                  style: TextStyle(color: cs.onSurfaceVariant),
-                ),
-                const SizedBox(height: 12),
-                Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 340),
-                    child: IgnorePointer(child: BoardView(board: List<int>.of(pos.board), flipped: widget.flipped, lastMove: last)),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _ply == 0 ? 'Thế ban đầu'.tr : '${game.moveTokens().isEmpty ? '' : _label(_ply - 1)}   ($_ply / ${_sans.length})',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  IconButton(tooltip: 'Về đầu ván'.tr, onPressed: _ply == 0 ? null : () => _go(0), icon: const Icon(Icons.first_page)),
-                  IconButton(tooltip: 'Nước trước'.tr, onPressed: _ply == 0 ? null : () => _go(_ply - 1), icon: const Icon(Icons.chevron_left)),
-                  const SizedBox(width: 4),
-                  IconButton.filled(
-                    tooltip: _playing ? 'Tạm dừng'.tr : 'Phát lại ván cờ'.tr,
-                    onPressed: empty ? null : _togglePlay,
-                    icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(tooltip: 'Nước sau'.tr, onPressed: _ply == _sans.length ? null : () => _go(_ply + 1), icon: const Icon(Icons.chevron_right)),
-                  IconButton(tooltip: 'Tới cuối ván'.tr, onPressed: _ply == _sans.length ? null : () => _go(_sans.length), icon: const Icon(Icons.last_page)),
-                ]),
-                const SizedBox(height: 4),
-                if (empty)
-                  Padding(padding: const EdgeInsets.all(16), child: Text('Chưa có nước nào.'.tr, textAlign: TextAlign.center, style: TextStyle(color: cs.onSurfaceVariant)))
-                else
-                  Card(child: Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Column(children: _rows(cs)))),
-                if (game.marks.values.any((q) => q >= 2)) ...[
-                  const SizedBox(height: 8),
-                  Text('Màu cam, đỏ: nước engine chấm là chưa chính xác hoặc sai lầm.'.tr, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                ],
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                  onPressed: empty ? null : _share,
-                  icon: const Icon(Icons.ios_share),
-                  label: Text('Chia sẻ tệp PGN'.tr),
-                ),
-                const SizedBox(height: 6),
-                Text('Tệp PGN mở được bằng Lichess, Chess.com và các phần mềm cờ vua khác.'.tr,
-                    textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-              ]),
-            ),
+      boardAfter: 2,
+      boardMaxWidth: 360,
+      trailing: KeyedSubtree(key: _shareKey, child: IosNavButton(icon: CupertinoIcons.share, onPressed: empty ? null : _export)),
+      children: [
+        IosSection(
+          top: 0,
+          dividerIndent: 80,
+          footer: [if (date.isNotEmpty) date, '{0} nước'.trArgs([_sans.length]), resultText(game)].join(' · '),
+          children: [_nameField(_white, 'Trắng'.tr), _nameField(_black, 'Đen'.tr)],
+        ),
+        const SizedBox(height: 16),
+        const SizedBox(height: 10),
+        Text(
+          _ply == 0 ? 'Thế ban đầu'.tr : '${game.moveTokens().isEmpty ? '' : _label(_ply - 1)}   ($_ply / ${_sans.length})',
+          textAlign: TextAlign.center,
+          style: tHeadline,
+        ),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          _step(CupertinoIcons.backward_end_fill, 'Về đầu ván'.tr, _ply == 0 ? null : () => _go(0)),
+          _step(CupertinoIcons.chevron_left, 'Nước trước'.tr, _ply == 0 ? null : () => _go(_ply - 1)),
+          _step(_playing ? CupertinoIcons.pause_circle_fill : CupertinoIcons.play_circle_fill, _playing ? 'Tạm dừng'.tr : 'Phát lại ván cờ'.tr, empty ? null : _togglePlay, size: 44),
+          _step(CupertinoIcons.chevron_right, 'Nước sau'.tr, _ply == _sans.length ? null : () => _go(_ply + 1)),
+          _step(CupertinoIcons.forward_end_fill, 'Tới cuối ván'.tr, _ply == _sans.length ? null : () => _go(_sans.length)),
+        ]),
+        if (empty)
+          Padding(padding: const EdgeInsets.all(16), child: Text('Chưa có nước nào.'.tr, textAlign: TextAlign.center, style: tSubhead.copyWith(color: grey)))
+        else
+          IosSection(
+            top: 8,
+            dividerIndent: 52,
+            footer: game.marks.values.any((q) => q >= 2) ? 'Màu cam, đỏ: nước engine chấm là chưa chính xác hoặc sai lầm.'.tr : null,
+            children: _rows(),
           ),
-        ],
-      ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
+          child: IosButton(label: 'Chia sẻ tệp PGN'.tr, icon: CupertinoIcons.share, onPressed: empty ? null : _share),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(32, 9, 32, 0),
+          child: Text('Tệp PGN mở được bằng Lichess, Chess.com và các phần mềm cờ vua khác.'.tr, textAlign: TextAlign.center, style: tFootnote.copyWith(color: grey)),
+        ),
+      ],
     );
   }
 
@@ -248,18 +248,20 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   /// Mỗi dòng một nước đủ: số thứ tự, nước trắng, nước đen.
-  List<Widget> _rows(ColorScheme cs) {
+  List<Widget> _rows() {
+    final tint = iosTint(context);
     Widget cell(int? i) {
       if (i == null || i < 0 || i >= _sans.length) return const Expanded(child: SizedBox());
       final on = _ply == i + 1;
       return Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(6),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: () => _go(i + 1),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-            decoration: BoxDecoration(color: on ? cs.primaryContainer : null, borderRadius: BorderRadius.circular(6)),
-            child: Text(_sans[i], style: TextStyle(fontSize: 16, fontWeight: on ? FontWeight.w700 : FontWeight.w500, color: qualityColor(game.marks[i]) ?? (on ? cs.onPrimaryContainer : null))),
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(color: on ? tint.withValues(alpha: 0.15) : null, borderRadius: BorderRadius.circular(8)),
+            child: Text(_sans[i], style: tBody.copyWith(fontWeight: on ? FontWeight.w600 : FontWeight.w400, color: qualityColor(game.marks[i]) ?? (on ? tint : iosLabel(context)))),
           ),
         ),
       );
@@ -271,9 +273,9 @@ class _RecordPageState extends State<RecordPage> {
     for (var h = 0; h < _sans.length + offset; h += 2) {
       final w = h - offset, b = h + 1 - offset;
       rows.add(Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.only(left: 16, right: 8),
         child: Row(children: [
-          SizedBox(width: 40, child: Text('${game.moveNo(b < _sans.length ? b : w).$1}.', style: TextStyle(color: cs.onSurfaceVariant))),
+          SizedBox(width: 36, child: Text('${game.moveNo(b < _sans.length ? b : w).$1}.', style: tSubhead.copyWith(color: iosLabel2(context)))),
           cell(w < 0 ? null : w),
           const SizedBox(width: 6),
           cell(b),
@@ -284,25 +286,19 @@ class _RecordPageState extends State<RecordPage> {
   }
 }
 
-/// Danh sách các ván đã ghi.
+/// Tab danh sách các ván đã ghi. Vuốt một dòng sang trái để xoá.
 class GamesPage extends StatelessWidget {
   const GamesPage({super.key, required this.store});
   final Store store;
 
-  Future<void> _delete(BuildContext context, List<Game> all, Game g) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text('Xoá ván này?'.tr),
-        content: Text('Biên bản "{0}" ({1} nước) sẽ bị xoá hẳn.'.trArgs([gameTitle(g), g.moves.length])),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: Text('Huỷ'.tr)),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: Text('Xoá'.tr)),
-        ],
-      ),
-    );
-    if (ok == true) await store.saveHistory([...all.where((o) => o.startedAt != g.startedAt)]);
-  }
+  Future<bool> _confirmDelete(BuildContext context, Game g) => iosConfirm(
+        context,
+        title: 'Xoá ván này?'.tr,
+        message: 'Biên bản "{0}" ({1} nước) sẽ bị xoá hẳn.'.trArgs([gameTitle(g), g.moves.length]),
+        ok: 'Xoá'.tr,
+        cancel: 'Huỷ'.tr,
+        destructive: true,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -310,39 +306,50 @@ class GamesPage extends StatelessWidget {
       listenable: store,
       builder: (context, _) {
         final all = store.history;
-        final cs = Theme.of(context).colorScheme;
-        return Scaffold(
-          appBar: AppBar(title: Text('Ván đã ghi'.tr)),
-          body: all.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text('Chưa có ván nào. Ván đang chơi được cất vào đây khi bạn bắt đầu ván khác.'.tr, textAlign: TextAlign.center, style: TextStyle(color: cs.onSurfaceVariant)),
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                  itemCount: all.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, i) {
-                    final g = all[i];
-                    final date = gameDate(g);
-                    return Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-                        leading: SizedBox(width: 56, height: 56, child: IgnorePointer(child: BoardView(board: List<int>.of(g.position().board)))),
-                        title: Text(gameTitle(g)),
-                        subtitle: Text([if (date.isNotEmpty && gameTitle(g) != date) date, '{0} nước'.trArgs([g.moves.length]), resultText(g)].join(' · ')),
-                        trailing: IconButton(tooltip: 'Xoá'.tr, icon: const Icon(Icons.delete_outline), onPressed: () => _delete(context, all, g)),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute<void>(builder: (_) => RecordPage(game: g, save: () => store.saveHistory(all))),
+        return IosPage(
+          large: true,
+          title: 'Ván đã ghi'.tr,
+          children: [
+            if (all.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(40, 120, 40, 0),
+                child: Column(children: [
+                  Icon(CupertinoIcons.clock, size: 52, color: iosLabel3(context)),
+                  const SizedBox(height: 14),
+                  Text('Chưa có ván nào.'.tr, textAlign: TextAlign.center, style: tTitle2),
+                  const SizedBox(height: 6),
+                  Text('Ván đang chơi được cất vào đây khi bạn bắt đầu ván khác.'.tr, textAlign: TextAlign.center, style: tSubhead.copyWith(color: iosLabel2(context))),
+                ]),
+              )
+            else
+              IosSection(top: 6, dividerIndent: 84, footer: 'Vuốt sang trái để xoá một ván.'.tr, children: [
+                for (final g in all)
+                  Dismissible(
+                    key: ValueKey(g.startedAt.microsecondsSinceEpoch),
+                    direction: DismissDirection.endToStart,
+                    confirmDismiss: (_) => _confirmDelete(context, g),
+                    onDismissed: (_) => store.saveHistory([...all.where((o) => o.startedAt != g.startedAt)]),
+                    background: Container(
+                      color: iosRed(context),
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: 22),
+                      child: const Icon(CupertinoIcons.trash_fill, color: CupertinoColors.white, size: 22),
+                    ),
+                    child: ColoredBox(
+                      color: iosCellBg(context),
+                      child: IosTile(
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(5),
+                          child: SizedBox(width: 56, height: 56, child: IgnorePointer(child: BoardView(board: List<int>.of(g.position().board)))),
                         ),
+                        title: gameTitle(g),
+                        subtitle: [if (gameDate(g).isNotEmpty && gameTitle(g) != gameDate(g)) gameDate(g), '{0} nước'.trArgs([g.moves.length]), resultText(g)].join(' · '),
+                        onTap: () => iosPush<void>(context, RecordPage(game: g, save: () => store.saveHistory(all))),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  ),
+              ]),
+          ],
         );
       },
     );

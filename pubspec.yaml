@@ -9,6 +9,8 @@ environment:
 dependencies:
   app_settings: ^9.0.1
   camera: ^0.12.2
+  cupertino_icons: ^1.0.9
+  cupertino_ui: ^1.1.7
   flutter:
     sdk: flutter
   flutter_localizations:

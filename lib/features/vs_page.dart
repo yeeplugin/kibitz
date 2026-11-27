@@ -4,7 +4,7 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
-import 'package:material_ui/material_ui.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 
 import '../core/chess/engine.dart';
 import '../core/chess/position.dart';
@@ -14,6 +14,7 @@ import '../data/store.dart';
 import '../services/analyzer.dart';
 import '../services/billing.dart';
 import '../shared/board_view.dart';
+import '../shared/ios.dart';
 import 'pro_page.dart';
 import 'record_page.dart';
 
@@ -31,7 +32,7 @@ class _VsPageState extends State<VsPage> {
 
   Game? _game;
   late int _me = store.vsColor;
-  late int _stage = store.vsStage;
+  late int _stage = math.min(store.vsStage, _stages.length);
 
   /// Lựa chọn ở màn bắt đầu ván: 0 trắng, 1 đen, 2 ngẫu nhiên.
   int _pick = 0;
@@ -76,7 +77,7 @@ class _VsPageState extends State<VsPage> {
   /// Thắng xong thì sang màn kế tiếp.
   Future<void> _nextStage() async {
     await _newGame();
-    if (mounted) setState(() => _stage = math.min(_stage + 1, Stage.all.length));
+    if (mounted) setState(() => _stage = math.min(_stage + 1, _stages.length));
   }
 
   String _stageNote(int n) => switch (n) {
@@ -89,11 +90,14 @@ class _VsPageState extends State<VsPage> {
       };
 
   /// Màn Stockfish cần bản Pro: chưa có thì mở trang nâng cấp.
+  /// Các màn chơi được trên máy này: màn Stockfish chỉ có ở nơi có Stockfish.
+  List<Stage> get _stages => [for (final s in Stage.all) if (!s.stockfish || Store.stockfishSupported) s];
+
   bool get _locked => Stage.of(_stage).stockfish && !store.pro;
 
   Future<void> _start() async {
     if (_locked) {
-      await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ProPage(store: store, billing: widget.billing)));
+      await iosPush<void>(context, ProPage(store: store, billing: widget.billing));
       if (!mounted) return;
       setState(() {});
       if (_locked) return;
@@ -188,15 +192,7 @@ class _VsPageState extends State<VsPage> {
       if (cands.isNotEmpty) {
         var m = cands.first;
         if (cands.length > 1) {
-          final pr = await showDialog<int>(
-            context: context,
-            builder: (c) => SimpleDialog(
-              title: Text('Phong cấp thành'.tr),
-              children: [
-                for (final t in const [queen, rook, bishop, knight]) SimpleDialogOption(onPressed: () => Navigator.pop(c, t), child: Text(pieceNames[t].tr)),
-              ],
-            ),
-          );
+          final pr = await iosActionSheet<int>(context, title: 'Phong cấp thành'.tr, cancel: 'Huỷ'.tr, actions: {for (final t in const [queen, rook, bishop, knight]) t: pieceNames[t].tr});
           if (pr == null || !mounted) return;
           m = cands.firstWhere((x) => mPromo(x) == pr);
         }
@@ -259,190 +255,168 @@ class _VsPageState extends State<VsPage> {
         MoveQuality.inaccuracy => const Color(0xFFB7791F),
         MoveQuality.mistake => const Color(0xFFDD6B20),
         MoveQuality.blunder => const Color(0xFFC53030),
-        null => Theme.of(context).colorScheme.onSurfaceVariant,
+        null => iosLabel2(context),
       };
 
   @override
   Widget build(BuildContext context) {
     final g = _game;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Đánh với máy'.tr),
-        actions: [
-          if (g != null) ...[
-            IconButton(
-              tooltip: 'Biên bản ván cờ'.tr,
-              icon: const Icon(Icons.list_alt),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute<void>(builder: (_) => RecordPage(game: g, save: () => store.saveVs(g), flipped: _me == black)),
+    return IosPage(
+      title: 'Đánh với máy'.tr,
+      trailing: g == null
+          ? null
+          : Row(mainAxisSize: MainAxisSize.min, children: [
+              IosNavButton(
+                icon: CupertinoIcons.list_bullet,
+                onPressed: () => iosPush<void>(context, RecordPage(game: g, save: () => store.saveVs(g), flipped: _me == black)),
               ),
-            ),
-            IconButton(tooltip: 'Ván mới'.tr, icon: const Icon(Icons.add), onPressed: _newGame),
-          ],
-        ],
-      ),
-      body: SafeArea(child: g == null ? _setup() : _play(g)),
+              IosNavButton(icon: CupertinoIcons.plus, onPressed: _newGame),
+            ]),
+      board: g == null ? null : _board(g),
+      boardAfter: 1,
+      children: g == null ? _setup() : _play(g),
     );
   }
 
-  Widget _stageTile(int n, ColorScheme cs) {
+  Widget _stageTile(int n) {
     final on = n == _stage, beaten = store.vsBeaten.contains(n);
-    return Material(
-      color: on ? cs.primary : cs.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => setState(() => _stage = n),
+    final tint = iosTint(context);
+    return GestureDetector(
+      onTap: () => setState(() => _stage = n),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(color: on ? tint : iosFill(context), borderRadius: BorderRadius.circular(12)),
         child: Stack(children: [
-          Center(child: Text('$n', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: on ? cs.onPrimary : cs.onSurface))),
-          if (beaten) Positioned(top: 4, right: 4, child: Icon(Icons.star, size: 14, color: on ? cs.onPrimary : const Color(0xFFF5B63A))),
-          if (Stage.of(n).stockfish && !store.pro) Positioned(bottom: 4, right: 4, child: Icon(Icons.lock, size: 13, color: on ? cs.onPrimary : cs.onSurfaceVariant)),
+          Center(child: Text('$n', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: on ? CupertinoColors.white : iosLabel(context)))),
+          if (beaten) Positioned(top: 5, right: 5, child: Icon(CupertinoIcons.star_fill, size: 12, color: on ? CupertinoColors.white : const Color(0xFFFFCC00))),
+          if (Stage.of(n).stockfish && !store.pro) Positioned(bottom: 5, right: 5, child: Icon(CupertinoIcons.lock_fill, size: 12, color: on ? CupertinoColors.white : iosLabel2(context))),
         ]),
       ),
     );
   }
 
-  Widget _setup() {
-    final cs = Theme.of(context).colorScheme;
-    Widget label(String s) => Padding(padding: const EdgeInsets.only(top: 16, bottom: 8), child: Text(s, style: Theme.of(context).textTheme.bodyLarge));
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-      children: [
-        Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    label('Bạn cầm quân'.tr),
-                    SegmentedButton<int>(
-                      showSelectedIcon: false,
-                      segments: [
-                        ButtonSegment(value: 0, label: Text('Trắng'.tr)),
-                        ButtonSegment(value: 1, label: Text('Đen'.tr)),
-                        ButtonSegment(value: 2, label: Text('Ngẫu nhiên'.tr)),
-                      ],
-                      selected: {_pick},
-                      onSelectionChanged: (v) => setState(() => _pick = v.first),
-                    ),
-                    label('Chọn màn'.tr),
-                    GridView.count(
-                      crossAxisCount: 6,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      mainAxisSpacing: 8,
-                      crossAxisSpacing: 8,
-                      children: [
-                        for (final st in Stage.all) _stageTile(st.no, cs),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Text(_stageNote(_stage), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                    const SizedBox(height: 4),
-                    Text('Đã thắng {0}/{1} màn.'.trArgs([store.vsBeaten.length, Stage.all.length]),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                  ]),
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                onPressed: _start,
-                icon: Icon(_locked ? Icons.workspace_premium : Icons.play_arrow),
-                label: Text(_locked ? 'Nâng cấp bản Pro'.tr : 'Bắt đầu'.tr),
-              ),
-              const SizedBox(height: 10),
-              Text('Chạm quân rồi chạm ô đến để đi. Bấm "Gợi ý" khi cần; app chấm từng nước bạn đi.'.tr,
-                  textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-            ]),
-          ),
+  List<Widget> _setup() {
+    return [
+      IosSection(top: 4, header: 'Bạn cầm quân'.tr, children: [
+        IosBlock(
+          child: IosSegmented<int>(items: {0: 'Trắng'.tr, 1: 'Đen'.tr, 2: 'Ngẫu nhiên'.tr}, value: _pick, onChanged: (v) => setState(() => _pick = v)),
         ),
-      ],
-    );
+      ]),
+      IosSection(
+        header: 'Chọn màn'.tr,
+        footer: '${_stageNote(_stage)}\n${'Đã thắng {0}/{1} màn.'.trArgs([store.vsBeaten.where((n) => n <= _stages.length).length, _stages.length])}',
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: GridView.count(
+              crossAxisCount: 6,
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 1.05,
+              children: [for (final st in _stages) _stageTile(st.no)],
+            ),
+          ),
+        ],
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+        child: IosButton(
+          onPressed: _start,
+          icon: _locked ? CupertinoIcons.star_fill : CupertinoIcons.play_fill,
+          label: _locked ? 'Nâng cấp bản Pro'.tr : 'Bắt đầu'.tr,
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(32, 9, 32, 0),
+        child: Text('Chạm quân rồi chạm ô đến để đi. Bấm "Gợi ý" khi cần; app chấm từng nước bạn đi.'.tr, textAlign: TextAlign.center, style: tFootnote.copyWith(color: iosLabel2(context))),
+      ),
+    ];
   }
 
-  Widget _play(Game g) {
-    final cs = Theme.of(context).colorScheme;
+  Widget _board(Game g) {
+    final a = _fresh;
+    final best = _hint && _myTurn && a != null && a.best.length >= 4 ? (parseSq(a.best.substring(0, 2)), parseSq(a.best.substring(2, 4))) : null;
+    return ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: BoardView(
+            board: List<int>.of(_pos.board),
+            flipped: _me == black,
+            selected: _sel,
+            lastMove: _pos.lastMove == null ? null : (mFrom(_pos.lastMove!), mTo(_pos.lastMove!)),
+            targets: {
+              if (_sel != null)
+                for (final m in _pos.legalMoves())
+                  if (mFrom(m) == _sel) mTo(m),
+            },
+            arrow: best,
+            onTap: _tap,
+          ),
+        );
+  }
+
+  List<Widget> _play(Game g) {
+    final grey = iosLabel2(context);
     final a = _fresh;
     final sans = g.sans();
-    final best = _hint && _myTurn && a != null && a.best.length >= 4 ? (parseSq(a.best.substring(0, 2)), parseSq(a.best.substring(2, 4))) : null;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-      children: [
-        Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text('{0} · màn {1}'.trArgs([_me == white ? 'Bạn cầm trắng'.tr : 'Bạn cầm đen'.tr, _stage]), style: TextStyle(color: cs.onSurfaceVariant)),
-              const SizedBox(height: 6),
-              BoardView(
-                board: List<int>.of(_pos.board),
-                flipped: _me == black,
-                selected: _sel,
-                lastMove: _pos.lastMove == null ? null : (mFrom(_pos.lastMove!), mTo(_pos.lastMove!)),
-                targets: {
-                  if (_sel != null)
-                    for (final m in _pos.legalMoves())
-                      if (mFrom(m) == _sel) mTo(m),
-                },
-                arrow: best,
-                onTap: _tap,
-              ),
-              const SizedBox(height: 10),
-              Text(_status(), style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-              if (_feedback != null) ...[
-                const SizedBox(height: 4),
-                Text('{0}: {1}'.trArgs(['Nước của bạn'.tr, _feedback]), style: TextStyle(color: _qColor(_feedbackQ), fontWeight: FontWeight.w600)),
-              ],
-              const SizedBox(height: 8),
-              Row(children: [
-                SizedBox(width: 52, child: Text(a == null ? '…' : scoreText(a), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16))),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: a == null ? 0.5 : (scoreBar(a) + 1) / 2,
-                      minHeight: 10,
-                      backgroundColor: const Color(0xFF2D2D2D),
-                      color: const Color(0xFFF2F2F2),
-                    ),
-                  ),
-                ),
-              ]),
-              if (a != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 3),
-                  child: Text('{0} · sâu {1}'.trArgs([_byStockfish ? 'Stockfish' : 'Engine có sẵn'.tr, a.depth]), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                ),
-              const SizedBox(height: 8),
-              Text(
-                sans.isEmpty ? 'Chưa có nước nào.'.tr : g.moveTokens().join(' '),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: cs.onSurfaceVariant, height: 1.4),
-              ),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(child: TextButton.icon(onPressed: _canUndo ? _undo : null, icon: const Icon(Icons.undo), label: Text('Lùi'.tr))),
-                Expanded(
-                  child: _over
-                      ? (_won && _stage < Stage.all.length
-                          ? FilledButton.icon(onPressed: _nextStage, icon: const Icon(Icons.arrow_forward), label: Text('Màn tiếp theo'.tr))
-                          : FilledButton.icon(onPressed: _newGame, icon: const Icon(Icons.add), label: Text('Ván mới'.tr)))
-                      : FilledButton.tonalIcon(
-                          onPressed: _myTurn && !_hint ? () => setState(() => _hint = true) : null,
-                          icon: const Icon(Icons.lightbulb_outline),
-                          label: Text('Gợi ý'.tr),
-                        ),
-                ),
-              ]),
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        child: Text('{0} · màn {1}'.trArgs([_me == white ? 'Bạn cầm trắng'.tr : 'Bạn cầm đen'.tr, _stage]),
+            textAlign: TextAlign.center, style: tFootnote.copyWith(color: grey)),
+      ),
+      IosSection(top: 12, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              if (!_over && !_myTurn) const Padding(padding: EdgeInsets.only(right: 8), child: CupertinoActivityIndicator(radius: 8)),
+              Expanded(child: Text(_status(), style: tHeadline)),
             ]),
+            if (_feedback != null) ...[
+              const SizedBox(height: 3),
+              Text('{0}: {1}'.trArgs(['Nước của bạn'.tr, _feedback]), style: tSubhead.copyWith(color: _qColor(_feedbackQ), fontWeight: FontWeight.w600)),
+            ],
+            const SizedBox(height: 10),
+            Row(children: [
+              SizedBox(width: 52, child: Text(a == null ? '…' : scoreText(a), style: tHeadline)),
+              Expanded(child: EvalBar(value: a == null ? 0.5 : (scoreBar(a) + 1) / 2)),
+            ]),
+            if (a != null)
+              Padding(padding: const EdgeInsets.only(top: 4), child: Text('{0} · sâu {1}'.trArgs([_byStockfish ? 'Stockfish' : 'Engine có sẵn'.tr, a.depth]), style: tFootnote.copyWith(color: grey))),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Text(
+            sans.isEmpty ? 'Chưa có nước nào.'.tr : g.moveTokens().join(' '),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: tSubhead.copyWith(color: grey, height: 1.4),
           ),
         ),
-      ],
-    );
+      ]),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Row(children: [
+          Expanded(child: IosButton(kind: IosButtonKind.gray, onPressed: _canUndo ? _undo : null, icon: CupertinoIcons.arrow_uturn_left, label: 'Lùi'.tr)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _over
+                ? (_won && _stage < _stages.length
+                    ? IosButton(onPressed: _nextStage, icon: CupertinoIcons.arrow_right, label: 'Màn tiếp theo'.tr)
+                    : IosButton(onPressed: _newGame, icon: CupertinoIcons.plus, label: 'Ván mới'.tr))
+                : IosButton(
+                    kind: IosButtonKind.tinted,
+                    onPressed: _myTurn && !_hint ? () => setState(() => _hint = true) : null,
+                    icon: CupertinoIcons.lightbulb,
+                    label: 'Gợi ý'.tr,
+                  ),
+          ),
+        ]),
+      ),
+    ];
   }
 }

@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:cupertino_ui/cupertino_ui.dart' show CupertinoThemeData;
 import 'package:material_ui/material_ui.dart';
 
 import 'data/store.dart';
-import 'features/home_page.dart';
+import 'debug_remote.dart';
+import 'features/root_page.dart';
 import 'shared/board_view.dart' show brandBlue;
 import 'services/billing.dart';
 
@@ -14,6 +16,7 @@ Future<void> main() async {
   // Hỏi lại cửa hàng quyền Pro; không chờ để app mở ngay.
   unawaited(billing.start());
   runApp(ChessApp(store: store, billing: billing));
+  startDebugRemote();
 }
 
 class ChessApp extends StatelessWidget {
@@ -32,11 +35,14 @@ class ChessApp extends StatelessWidget {
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
-      scaffoldBackgroundColor: light ? const Color(0xFFF2F2F7) : scheme.surface,
+      scaffoldBackgroundColor: light ? const Color(0xFFF2F2F7) : Colors.black,
+      splashFactory: NoSplash.splashFactory,
+      highlightColor: Colors.transparent,
+      cupertinoOverrideTheme: CupertinoThemeData(brightness: b, primaryColor: light ? brandBlue : const Color(0xFF0A84FF)),
       cardTheme: CardThemeData(
         elevation: 0,
         margin: EdgeInsets.zero,
-        color: b == Brightness.light ? Colors.white : scheme.surfaceContainer,
+        color: light ? Colors.white : const Color(0xFF1C1C1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     );
@@ -54,7 +60,7 @@ class ChessApp extends StatelessWidget {
         locale: Locale(store.lang),
         supportedLocales: const [Locale('vi'), Locale('en')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        home: HomePage(store: store, billing: billing),
+        home: RootPage(store: store, billing: billing),
       ),
     );
   }
